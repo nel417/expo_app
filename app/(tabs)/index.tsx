@@ -1,17 +1,26 @@
 import Camera from '@/components/Camera';
-import Note from '@/components/Note';
+import Note, { NoteData } from '@/components/Note';
 import PedometerComponent from '@/components/Pedometer';
 import { StyleSheet, View, TouchableOpacity, Text, Modal, Animated } from 'react-native';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AntDesign } from '@expo/vector-icons';
+import NoteGrid from '@/components/NoteGrid';
+import { useLocalSearchParams } from 'expo-router';
+import { useAtom } from 'jotai';
+import { activeComponentAtom } from '@/store/atoms';
 
-type ActiveComponent = 'none' | 'camera' | 'note';
+export type ActiveComponent = 'none' | 'camera' | 'note';
 
 export default function HomeScreen() {
+  const { promptedNote, activeComponent: initialComponent } = useLocalSearchParams();
   const [showModal, setShowModal] = useState(false);
-  const [activeComponent, setActiveComponent] = useState<ActiveComponent>('none');
+  const [activeComponent, setActiveComponent] = useAtom(activeComponentAtom);
+  const [notes, setNotes] = useState<NoteData[]>([]);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    loadNotes();
     if (showModal) {
       Animated.spring(slideAnim, {
         toValue: 1,
@@ -25,26 +34,87 @@ export default function HomeScreen() {
     }
   }, [showModal]);
 
-  const handleOptionSelect = (component: ActiveComponent) => {
+  useEffect(() => {
+    if (promptedNote && typeof promptedNote === 'object') {
+      navigateToNote(promptedNote as unknown as NoteData);
+    }
+  }, [promptedNote]);
+
+  const loadNotes = async () => {
+    try {
+      const savedNotes = await AsyncStorage.getItem('notes');
+      if (savedNotes) {
+        setNotes(JSON.parse(savedNotes));
+      }
+    } catch (error) {
+      console.error('Error loading notes:', error);
+    }
+  };
+
+  const handleSaveNote = useCallback(async (newNote: NoteData) => {
+    try {
+      const updatedNotes = [newNote, ...notes];
+      await AsyncStorage.multiSet([
+        ['notes', JSON.stringify(updatedNotes)],
+        ['lastUpdated', Date.now().toString()]
+      ]);
+      setNotes(updatedNotes);
+    } catch (error) {
+      console.error('Error saving note:', error);
+    }
+  }, [notes]);
+
+  const handleDeleteNote = useCallback(async (id: string) => {
+    try {
+      const updatedNotes = notes.filter(note => note.id !== id);
+      await AsyncStorage.setItem('notes', JSON.stringify(updatedNotes));
+      setNotes(updatedNotes);
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
+  }, [notes]);
+
+  const handleOptionSelect = useCallback((component: ActiveComponent) => {
     setShowModal(false);
     setActiveComponent(component);
+  }, []);
+
+  const navigateToNote = (note: NoteData) => {
+    setActiveComponent('note');
   };
 
   if (activeComponent === 'camera') {
-    return <Camera onClose={() => setActiveComponent('none')} />;
+    return (
+      <Camera 
+        onClose={() => setActiveComponent('none')} 
+        onPhotoTaken={handleSaveNote}
+      />
+    );
   }
 
   if (activeComponent === 'note') {
-    return <Note onClose={() => setActiveComponent('none')} />;
+    return (
+      <Note 
+        onClose={() => {
+          setActiveComponent('none');
+        }} 
+        onSave={handleSaveNote}
+        initialNote={typeof promptedNote === 'object' ? (promptedNote as unknown as NoteData) : null}
+      />
+    );
   }
 
   return (
     <View style={styles.container}>
+      <NoteGrid 
+        notes={notes} 
+        onDeleteNote={handleDeleteNote}
+      />
       <TouchableOpacity 
-        style={styles.cameraButton} 
+        style={styles.addButton} 
         onPress={() => setShowModal(true)}
       >
-        <Text style={styles.plusIcon}>+</Text>
+        <AntDesign name="plus" size={24} color="white" />
       </TouchableOpacity>
       <PedometerComponent />
 
@@ -106,14 +176,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  cameraButton: {
+  addButton: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -30 }, { translateY: -30 }],
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    right: 20,
+    bottom: 300, // Position above the pedometer
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
@@ -125,11 +194,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-  },
-  plusIcon: {
-    fontSize: 40,
-    color: 'white',
-    fontWeight: 'bold',
+    zIndex: 1,
   },
   modalOverlay: {
     flex: 1,

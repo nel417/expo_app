@@ -1,42 +1,85 @@
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useState } from 'react';
 import { Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSetAtom } from 'jotai';
+import { activeComponentAtom } from '@/store/atoms';
+import * as FileSystem from 'expo-file-system';
+import { NoteData } from './Note';
 
 interface CameraProps {
   onClose: () => void;
+  onPhotoTaken: (note: NoteData) => void;
 }
 
-export default function Camera({ onClose }: CameraProps) {
+export default function Camera({ onClose, onPhotoTaken }: CameraProps) {
   const [facing, setFacing] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
+  const [camera, setCamera] = useState<CameraView | null>(null);
+  const setActiveComponent = useSetAtom(activeComponentAtom);
+
+  const takePicture = async () => {
+    if (camera) {
+      try {
+        const photo = await camera.takePictureAsync();
+        if (!photo) return;  // Add early return if photo is undefined
+        
+        // Create a unique filename
+        const filename = `${FileSystem.documentDirectory}photos/${Date.now()}.jpg`;
+        
+        // Ensure directory exists
+        await FileSystem.makeDirectoryAsync(
+          `${FileSystem.documentDirectory}photos`,
+          { intermediates: true }
+        );
+        
+        // Move photo to permanent location
+        await FileSystem.moveAsync({
+          from: photo.uri,
+          to: filename
+        });
+
+        // Create a new note with the photo
+        const newNote: NoteData = {
+          id: Date.now().toString(),
+          title: 'Photo Note',
+          content: '',
+          timestamp: Date.now(),
+          color: '#BAE1FF',
+          imageUri: filename
+        };
+
+        onPhotoTaken(newNote);
+        setActiveComponent('none');
+      } catch (error) {
+        console.error('Error taking picture:', error);
+      }
+    }
+  };
+
+  const toggleCameraFacing = () => {
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
 
   if (!permission) {
-    // Camera permissions are still loading.
     return <View />;
   }
 
   if (!permission.granted) {
-    // Camera permissions are not granted yet.
     return (
       <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
+        <Text style={{ textAlign: 'center' }}>We need your permission to show the camera</Text>
         <Button onPress={requestPermission} title="grant permission" />
       </View>
     );
   }
 
-  function toggleCameraFacing() {
-    setFacing(current => (current === 'back' ? 'front' : 'back'));
-  }
-
-  function takePicture() { 
-    console.log('Picture taken');
-    alert('Picture taken');
-  }
-
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} facing={facing}>
+      <CameraView 
+        ref={ref => setCamera(ref)}
+        style={styles.camera} 
+        facing={facing}
+      >
         <TouchableOpacity style={styles.backButton} onPress={onClose}>
           <Text style={styles.backText}>×</Text>
         </TouchableOpacity>
@@ -44,8 +87,8 @@ export default function Camera({ onClose }: CameraProps) {
           <TouchableOpacity style={styles.button} onPress={toggleCameraFacing}>
             <Text style={styles.text}>Flip Camera</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.button} onPress={takePicture}>
-            <Text style={styles.text}>Take Picture</Text>
+          <TouchableOpacity style={[styles.button, styles.captureButton]} onPress={takePicture}>
+            <View style={styles.captureInner} />
           </TouchableOpacity>
         </View>
       </CameraView>
@@ -70,17 +113,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: 'transparent',
     margin: 64,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
   button: {
-    flex: 1,
-    alignSelf: 'flex-end',
     alignItems: 'center',
+    padding: 20,
   },
   text: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '600',
     color: 'white',
-    marginBottom: 100,
   },
   backButton: {
     position: 'absolute',
@@ -99,4 +146,19 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: 'bold',
   },
+  captureButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  captureInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#007AFF',
+  }
 });

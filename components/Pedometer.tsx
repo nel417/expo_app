@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   StyleSheet, 
   Text, 
@@ -6,11 +6,17 @@ import {
   Animated, 
   PanResponder,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Pedometer } from 'expo-sensors';
+import { usePedometer } from '@/context/PedometerContext';
+import { useRouter } from 'expo-router';
+import { NoteData } from './Note';
+import { useSetAtom } from 'jotai';
+import { activeComponentAtom } from '@/store/atoms';
 
 const MILESTONES = [
-  { steps: 100, message: "Great start! You've taken your first 100 steps!" },
+  { steps: 10, message: "Great start! You've taken your first 100 steps!" },
   { steps: 1000, message: "You're on a roll! 1,000 steps completed!" },
   { steps: 5000, message: "Halfway there! Keep going!" },
   { steps: 10000, message: "Amazing! You've hit your 10,000 steps goal! 🎉" },
@@ -20,11 +26,12 @@ const MIN_HEIGHT = 280; // Minimum height in pixels
 const MAX_HEIGHT = Dimensions.get('window').height * 0.75; // 75% of screen height
 
 export default function PedometerComponent() {
-  const [isPedometerAvailable, setIsPedometerAvailable] = useState('checking');
-  const [currentStepCount, setCurrentStepCount] = useState(0);
+  const router = useRouter();
+  const { isPedometerAvailable, currentStepCount, achievedMilestones } = usePedometer();
   const [isExpanded, setIsExpanded] = useState(false);
-  const achievedMilestones = useRef<Set<number>>(new Set());
   const pan = useRef(new Animated.Value(0)).current;
+  const [isAlertShowing, setIsAlertShowing] = useState(false);
+  const setActiveComponent = useSetAtom(activeComponentAtom);
 
   const panResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -59,50 +66,66 @@ export default function PedometerComponent() {
     },
   });
 
-  const checkMilestones = (steps: number) => {
-    MILESTONES.forEach(({ steps: milestone }) => {
-      if (steps >= milestone) {
-        achievedMilestones.current.add(milestone);
+  useEffect(() => {
+    if (isAlertShowing) return;
+
+    MILESTONES.forEach(({ steps, message }) => {
+      if (currentStepCount >= steps && !achievedMilestones.has(steps)) {
+        setIsAlertShowing(true);
+        achievedMilestones.add(steps);
+        
+        Alert.alert(
+          '🎉 Milestone Achieved!',
+          `You've reached ${steps} steps! What's on your mind?`,
+          [
+            {
+              text: 'No thanks',
+              style: 'cancel',
+              onPress: () => setIsAlertShowing(false)
+            },
+            {
+              text: 'Write Note',
+              onPress: () => {
+                setIsAlertShowing(false);
+                const newNote: NoteData = {
+                  id: Date.now().toString(),
+                  title: `${steps} Steps Milestone`,
+                  content: '',
+                  timestamp: Date.now(),
+                  color: '#BAFFC9',
+                };
+                handleOptionSelect('note', newNote);
+              },
+            },
+          ],
+          { 
+            cancelable: false
+          }
+        );
       }
     });
+  }, [currentStepCount, isAlertShowing]);
+
+  const handleOptionSelect = (component: 'note', note: NoteData) => {
+    setActiveComponent('note');
+    router.setParams({ promptedNote: JSON.stringify(note) });
   };
 
-  const subscribe = async () => {
-    const isAvailable = await Pedometer.isAvailableAsync();
-    setIsPedometerAvailable(String(isAvailable));
+  const containerHeight = useMemo(() => 
+    pan.interpolate({
+      inputRange: [-Dimensions.get('window').height * 0.5, 0],
+      outputRange: [MAX_HEIGHT, MIN_HEIGHT],
+      extrapolate: 'clamp',
+    })
+  , []);
 
-    if (isAvailable) {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 1);
+  const nextMilestone = useMemo(() => 
+    MILESTONES.find(m => m.steps > currentStepCount)?.steps || 'Max'
+  , [currentStepCount]);
 
-      return Pedometer.watchStepCount(result => {
-        setCurrentStepCount(result.steps);
-        checkMilestones(result.steps);
-      });
-    }
-  };
-
-  useEffect(() => {
-    let subscription: Pedometer.Subscription | undefined;
-    
-    const start = async () => {
-      subscription = await subscribe();
-    };
-    
-    start();
-    
-    return () => subscription?.remove();
-  }, []);
-
-  const nextMilestone = MILESTONES.find(m => m.steps > currentStepCount)?.steps || 'Max';
-  const stepsToNextMilestone = nextMilestone === 'Max' ? 0 : nextMilestone - currentStepCount;
-
-  const containerHeight = pan.interpolate({
-    inputRange: [-Dimensions.get('window').height * 0.5, 0],
-    outputRange: [MAX_HEIGHT, MIN_HEIGHT],
-    extrapolate: 'clamp',
-  });
+  const stepsToNextMilestone = useMemo(() => 
+    nextMilestone === 'Max' ? 0 : nextMilestone - currentStepCount
+  , [nextMilestone, currentStepCount]);
 
   return (
     <Animated.View 
@@ -137,12 +160,12 @@ export default function PedometerComponent() {
                 key={steps} 
                 style={[
                   styles.milestoneItem,
-                  achievedMilestones.current.has(steps) && styles.achievedMilestone
+                  achievedMilestones.has(steps) && styles.achievedMilestone
                 ]}
               >
                 <Text style={styles.milestoneSteps}>{steps} Steps</Text>
                 <Text style={styles.milestoneMessage}>{message}</Text>
-                {achievedMilestones.current.has(steps) && (
+                {achievedMilestones.has(steps) && (
                   <Text style={styles.achievedCheck}>✓</Text>
                 )}
               </View>

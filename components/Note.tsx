@@ -8,18 +8,44 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export interface NoteData {
+  id: string;
+  title: string;
+  content: string;
+  timestamp: number;
+  color: string;
+  imageUri?: string;
+}
 
 interface NoteProps {
   onClose: () => void;
+  onSave: (note: NoteData) => void;
+  initialNote?: NoteData | null;
 }
 
-export default function Note({ onClose }: NoteProps) {
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+const COLORS = ['#FFB3BA', '#BAFFC9', '#BAE1FF', '#FFFFBA'];
 
-  const handleSave = () => {
-    // TODO: Implement note saving functionality
-    console.log({ title, content });
+export default function Note({ onClose, onSave, initialNote }: NoteProps) {
+  const [title, setTitle] = useState(initialNote?.title || '');
+  const [content, setContent] = useState(initialNote?.content || '');
+
+  const handleSave = async () => {
+    if (!title && !content) {
+      onClose();
+      return;
+    }
+
+    const newNote: NoteData = {
+      id: Date.now().toString(),
+      title,
+      content,
+      timestamp: Date.now(),
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    };
+
+    onSave(newNote);
     onClose();
   };
 
